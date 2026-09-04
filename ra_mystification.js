@@ -40,20 +40,20 @@
  */
 
 (async () => {
-  // ============ НАСТРОЙКИ ============
-  const PACKS      = ["pf2e.equipment-srd"]; // можно добавить свои компендиумы
+  // ============ SETTINGS ============
+  const PACKS      = ["pf2e.equipment-srd"]; // add your own compendiums here
   const CATEGORIES = ["potion", "elixir", "talisman"];
-  const TOLERANCE  = 0.25;  // ±25% — полоса поиска при совпадении по цене
-  const LEVEL_SPAN = 1;     // ±1 уровень — полоса при совпадении по уровню
-  const MAX        = 15;    // сколько вариантов показывать
-  const SET_STATUS = false; // true — сразу мистифицировать;
-                            // false — только подготовить маскировку
-  // ===================================
+  const TOLERANCE  = 0.25;  // +/-25% band when matching by price
+  const LEVEL_SPAN = 1;     // +/-1 level band when matching by level
+  const MAX        = 15;    // how many candidates to show
+  const SET_STATUS = false; // true  - mystify the item immediately
+                            // false - only prepare the disguise
+  // ==================================
 
-  // --- вспомогательные ---
+  // --- helpers ---
   const cp = (price) => {
     const v = price?.value;
-    if (!v) return null;                       // цены нет → исключаем
+    if (!v) return null;                       // no price -> exclude
     const per = price?.per ?? 1;
     const total = (v.pp ?? 0) * 1000 + (v.gp ?? 0) * 100
                 + (v.sp ?? 0) * 10  + (v.cp ?? 0);
@@ -71,17 +71,17 @@
   const esc = (s) => String(s ?? "").replace(/[&<>"]/g,
     (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-  // --- 1. окно с приёмом перетаскивания ---
+  // --- 1. drop target window ---
   const item = await new Promise((resolve) => {
     let done = false;
     const dlg = new foundry.applications.api.DialogV2({
-      window: { title: "Мистификация — перетащи предмет" },
+      window: { title: "Mystify — drop an item" },
       content: `
         <div id="myst-drop" style="border:2px dashed #888;padding:2.5rem;
              text-align:center;border-radius:6px;opacity:.85;">
-          Перетащи сюда предмет
+          Drop an item here
         </div>`,
-      buttons: [{ action: "cancel", label: "Отмена" }],
+      buttons: [{ action: "cancel", label: "Cancel" }],
       close: () => { if (!done) resolve(null); }
     });
 
@@ -103,7 +103,7 @@
           resolve(doc);
           dlg.close();
         } catch (e) {
-          ui.notifications.error("Не удалось прочитать перетащенный предмет");
+          ui.notifications.error("Could not read the dropped item");
         }
       });
     });
@@ -112,25 +112,25 @@
   if (!item) return;
 
   if (!item.isOwner)
-    return ui.notifications.error("Нет прав на изменение этого предмета");
+    return ui.notifications.error("You do not have permission to modify this item");
 
   const cat = catOf(item.system);
   if (!CATEGORIES.includes(cat))
     return ui.notifications.warn(
-      `Категория "${cat ?? "—"}" пока не поддерживается. ` +
-      `Поддерживаются: ${CATEGORIES.join(", ")}`);
+      `Category "${cat ?? "—"}" is not supported yet. ` +
+      `Supported: ${CATEGORIES.join(", ")}`);
 
   const targetPrice = cp(item.system.price);
   const targetLevel = item.system.level?.value ?? null;
 
   if (targetPrice === null && targetLevel === null)
-    return ui.notifications.error("У предмета нет ни цены, ни уровня");
+    return ui.notifications.error("This item has neither a price nor a level");
 
-  // --- 2. собираем кандидатов из компендиумов ---
+  // --- 2. gather candidates from the compendiums ---
   const pool = [];
   for (const key of PACKS) {
     const pack = game.packs.get(key);
-    if (!pack) { ui.notifications.warn(`Компендиум ${key} не найден`); continue; }
+    if (!pack) { ui.notifications.warn(`Compendium ${key} not found`); continue; }
     const index = await pack.getIndex({ fields: [
       "type", "img", "system.price", "system.category",
       "system.consumableType", "system.level"
@@ -151,9 +151,9 @@
   }
 
   if (!pool.length)
-    return ui.notifications.warn("В компендиумах нет предметов этой категории");
+    return ui.notifications.warn("No items of this category found in the compendiums");
 
-  // --- 3. три режима подбора ---
+  // --- 3. three matching modes ---
   const buildByPrice = () => {
     if (targetPrice === null) return [];
     const scored = pool.filter((x) => x.price !== null);
@@ -188,11 +188,11 @@
     return list.slice(0, MAX);
   };
 
-  // --- 4. окно выбора ---
+  // --- 4. selection window ---
   const badge = (x) => {
     const bits = [];
     if (x.price !== null) {
-      if (targetPrice !== null && x.price === targetPrice) bits.push("цена точная");
+      if (targetPrice !== null && x.price === targetPrice) bits.push("exact price");
       else if (targetPrice) {
         const d = Math.round((x.price / targetPrice - 1) * 100);
         bits.push(`${d > 0 ? "+" : ""}${d}%`);
@@ -200,8 +200,8 @@
     }
     if (x.level !== null) {
       const d = targetLevel === null ? null : x.level - targetLevel;
-      bits.push(d === 0 || d === null ? `ур. ${x.level}`
-                                      : `ур. ${x.level} (${d > 0 ? "+" : ""}${d})`);
+      bits.push(d === 0 || d === null ? `lvl ${x.level}`
+                                      : `lvl ${x.level} (${d > 0 ? "+" : ""}${d})`);
     }
     return bits.join(" · ");
   };
@@ -209,7 +209,7 @@
   const renderList = (mode) => {
     const list = build(mode);
     if (!list.length)
-      return `<p style="opacity:.7;padding:1rem 0;">Ничего не найдено в этом режиме.</p>`;
+      return `<p style="opacity:.7;padding:1rem 0;">Nothing found in this mode.</p>`;
     return list.map((x, i) => `
       <label style="display:flex;gap:.5rem;align-items:center;
                     padding:.3rem .2rem;border-bottom:1px solid rgba(128,128,128,.2);">
@@ -225,12 +225,12 @@
   const header = `
     <p style="opacity:.75;margin:0 0 .5rem 0;">
       <b>${esc(item.name)}</b> — ${esc(fmt(targetPrice))}${
-        targetLevel !== null ? `, уровень ${targetLevel}` : ""}
+        targetLevel !== null ? `, level ${targetLevel}` : ""}
     </p>
     <div style="display:flex;gap:1rem;margin-bottom:.5rem;">
-      <label><input type="radio" name="mode" value="price" checked> по цене</label>
-      <label><input type="radio" name="mode" value="level"> по уровню</label>
-      <label><input type="radio" name="mode" value="both"> и то, и другое</label>
+      <label><input type="radio" name="mode" value="price" checked> by price</label>
+      <label><input type="radio" name="mode" value="level"> by level</label>
+      <label><input type="radio" name="mode" value="both"> both</label>
     </div>`;
 
   let currentMode = "price";
@@ -238,12 +238,12 @@
   const picked = await new Promise((resolve) => {
     let done = false;
     const dlg = new foundry.applications.api.DialogV2({
-      window: { title: `Чем замаскировать: ${item.name}`, resizable: true },
+      window: { title: `Disguise "${item.name}" as…`, resizable: true },
       position: { width: 520 },
       content: `${header}<div id="myst-list"
                    style="max-height:420px;overflow:auto;">${renderList("price")}</div>`,
       buttons: [
-        { action: "ok", label: "Применить", default: true,
+        { action: "ok", label: "Apply", default: true,
           callback: (ev, btn) => {
             const sel = btn.form.elements.pick;
             if (!sel) return null;
@@ -251,7 +251,7 @@
             done = true;
             return build(currentMode)[idx] ?? null;
           }},
-        { action: "cancel", label: "Отмена", callback: () => null }
+        { action: "cancel", label: "Cancel", callback: () => null }
       ],
       submit: (result) => resolve(result ?? null),
       close: () => { if (!done) resolve(null); }
@@ -270,10 +270,10 @@
 
   if (!picked) return;
 
-  // --- 5. применяем маскировку ---
+  // --- 5. apply the disguise ---
   const pack = game.packs.get(picked.pack);
   const fake = await pack.getDocument(picked._id);
-  if (!fake) return ui.notifications.error("Не удалось загрузить выбранный предмет");
+  if (!fake) return ui.notifications.error("Could not load the selected item");
 
   await item.update({
     "system.identification.unidentified.name": fake.name,
@@ -284,9 +284,9 @@
 
   if (SET_STATUS) {
     await item.update({ "system.identification.status": "unidentified" });
-    ui.notifications.info(`${item.name} мистифицирован под "${fake.name}"`);
+    ui.notifications.info(`${item.name} is now mystified as "${fake.name}"`);
   } else {
     ui.notifications.info(
-      `Маскировка готова: ${item.name} → "${fake.name}". Мистифицируй вручную.`);
+      `Disguise ready: ${item.name} → "${fake.name}". Mystify it manually.`);
   }
 })();
